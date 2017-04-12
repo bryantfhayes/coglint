@@ -643,7 +643,7 @@ _quiet = False
 
 # The allowed line length of files.
 # This is set by --linelength flag.
-_line_length = 120
+_line_length = 100
 
 try:
   xrange(1, 0)
@@ -970,7 +970,8 @@ class _IncludeState(object):
 class _coglintState(object):
   """Maintains module-wide state.."""
 
-  def __init__(self):
+  def __init__(self):       # picky mode enabled?
+    self.picky = False
     self.verbose_level = 1  # global setting.
     self.error_count = 0    # global count of reported errors
     # filters to apply when emitting error messages
@@ -1001,6 +1002,12 @@ class _coglintState(object):
     last_verbose_level = self.verbose_level
     self.verbose_level = level
     return last_verbose_level
+
+  def SetPickyEnable(self, enabled):
+    """Sets the module to be picky and show errors dealing with preference"""
+    last_picky_enabled = self.picky
+    self.picky = enabled
+    return self.picky
 
   def SetCountingStyle(self, counting_style):
     """Sets the module's counting options."""
@@ -1146,6 +1153,8 @@ def _SetVerboseLevel(level):
   """Sets the module's verbosity, and returns the previous setting."""
   return _coglint_state.SetVerboseLevel(level)
 
+def _SetPickyEnable(enabled):
+  return _coglint_state.SetPickyEnable(enabled)
 
 def _SetCountingStyle(level):
   """Sets the module's counting options."""
@@ -1932,14 +1941,14 @@ def ReverseCloseExpression(clean_lines, linenum, pos):
 def CheckForCopyright(filename, lines, error):
   """Logs an error if no Copyright message appears at the top of the file."""
 
-  # We'll say it should occur by line 10. Don't forget there's a
-  # dummy line at the front.
-  for line in range(1, min(len(lines), 11)):
-    if re.search(r'Copyright', lines[line], re.I): break
+  # We'll say it should occur somewhere in file and atleast
+  # have the (c) marker to avoid catching another use of 'Copyright'
+  for line in range(1, len(lines)):
+    if re.search(r'Copyright\s*\(c\)', lines[line], re.I): break
   else:                       # means no copyright line was found
     error(filename, 0, 'legal/copyright', 5,
           'No copyright message found.  '
-          'You should have a line: "Copyright [year] <Copyright Owner>"')
+          'You should have a line: "Copyright (c) <year> By Cognex Corporation. All rights reserved."')
 
 
 def GetIndentLevel(line):
@@ -1969,24 +1978,7 @@ def GetHeaderGuardCPPVariable(filename):
     named file.
 
   """
-
-  # Restores original filename in case that coglint is invoked from Emacs's
-  # flymake.
-  filename = re.sub(r'_flymake\.h$', '.h', filename)
-  filename = re.sub(r'/\.flymake/([^/]*)$', r'/\1', filename)
-  # Replace 'c++' with 'cpp'.
-  filename = filename.replace('C++', 'cpp').replace('c++', 'cpp')
-
-  fileinfo = FileInfo(filename)
-  file_path_from_root = fileinfo.RepositoryName()
-  if _root:
-    suffix = os.sep
-    # On Windows using directory separator will leave us with
-    # "bogus escape error" unless we properly escape regex.
-    if suffix == '\\':
-      suffix += '\\'
-    file_path_from_root = re.sub('^' + _root + suffix, '', file_path_from_root)
-  return re.sub(r'[^a-zA-Z0-9]', '_', file_path_from_root).upper() + '_'
+  return (filename.split('.')[0] + "_H_01012017").upper()
 
 
 def CheckForHeaderGuard(filename, clean_lines, error):
@@ -2041,31 +2033,28 @@ def CheckForHeaderGuard(filename, clean_lines, error):
 
   if not ifndef or not define or ifndef != define:
     error(filename, 0, 'build/header_guard', 5,
-          'No #ifndef header guard found, suggested CPP variable is: %s' %
+          'No #ifndef header guard found, suggested CPP variable is of form: %s' %
           cppvar)
     return
 
   # The guard should be PATH_FILE_H_, but we also allow PATH_FILE_H__
   # for backward compatibility.
-  if ifndef != cppvar:
-    error_level = 0
-    if ifndef != cppvar + '_':
-      error_level = 5
+  # IGNORE NON-MATCHING CPPVAR
+  # if ifndef != cppvar:
+  #   error_level = 0
+  #   if ifndef != cppvar + '_':
+  #     error_level = 5
 
-    ParseNolintSuppressions(filename, raw_lines[ifndef_linenum], ifndef_linenum,
-                            error)
-    error(filename, ifndef_linenum, 'build/header_guard', error_level,
-          '#ifndef header guard has wrong style, please use: %s' % cppvar)
+  #   ParseNolintSuppressions(filename, raw_lines[ifndef_linenum], ifndef_linenum,
+  #                           error)
+  #   error(filename, ifndef_linenum, 'build/header_guard', error_level,
+  #         '#ifndef header guard has wrong style, please use: %s' % cppvar)
 
   # Check for "//" comments on endif line.
   ParseNolintSuppressions(filename, raw_lines[endif_linenum], endif_linenum,
                           error)
-  match = Match(r'#endif\s*//\s*' + cppvar + r'(_)?\b', endif)
+  match = Match(r'#endif\s*//\s*' + r'.*', endif)
   if match:
-    if match.group(1) == '_':
-      # Issue low severity warning for deprecated double trailing underscore
-      error(filename, endif_linenum, 'build/header_guard', 0,
-            '#endif line should be "#endif  // %s"' % cppvar)
     return
 
   # Didn't find the corresponding "//" comment.  If this file does not
@@ -2079,17 +2068,13 @@ def CheckForHeaderGuard(filename, clean_lines, error):
       break
 
   if no_single_line_comments:
-    match = Match(r'#endif\s*/\*\s*' + cppvar + r'(_)?\s*\*/', endif)
+    match = Match(r'#endif\s*/\*\s*' + r'.*' + r'(_)?\s*\*/', endif)
     if match:
-      if match.group(1) == '_':
-        # Low severity warning for double trailing underscore
-        error(filename, endif_linenum, 'build/header_guard', 0,
-              '#endif line should be "#endif  /* %s */"' % cppvar)
       return
 
   # Didn't find anything
   error(filename, endif_linenum, 'build/header_guard', 5,
-        '#endif line should be "#endif  // %s"' % cppvar)
+        '#endif line should be of the form "#endif  // %s"' % cppvar)
 
 
 def CheckHeaderFileIncluded(filename, include_state, error):
@@ -2799,24 +2784,26 @@ class NestingState(object):
           r'^(.*)\b(public|private|protected|signals)(\s+(?:slots\s*)?)?'
           r':(?:[^:]|$)',
           line)
-      if access_match:
-        classinfo.access = access_match.group(2)
 
-        # Check that access keywords are indented +1 space.  Skip this
-        # check if the keywords are not preceded by whitespaces.
-        indent = access_match.group(1)
-        if (len(indent) != classinfo.class_indent + 1 and
-            Match(r'^\s*$', indent)):
-          if classinfo.is_struct:
-            parent = 'struct ' + classinfo.name
-          else:
-            parent = 'class ' + classinfo.name
-          slots = ''
-          if access_match.group(3):
-            slots = access_match.group(3)
-          error(filename, linenum, 'whitespace/indent', 3,
-                '%s%s: should be indented +1 space inside %s' % (
-                    access_match.group(2), slots, parent))
+      # IGNORE PUBLIC INDENTATION WARNING
+      # if access_match:
+      #   classinfo.access = access_match.group(2)
+
+      #   # Check that access keywords are indented +1 space.  Skip this
+      #   # check if the keywords are not preceded by whitespaces.
+      #   indent = access_match.group(1)
+      #   if (len(indent) != classinfo.class_indent + 1 and
+      #       Match(r'^\s*$', indent)):
+      #     if classinfo.is_struct:
+      #       parent = 'struct ' + classinfo.name
+      #     else:
+      #       parent = 'class ' + classinfo.name
+      #     slots = ''
+      #     if access_match.group(3):
+      #       slots = access_match.group(3)
+      #     error(filename, linenum, 'whitespace/indent', 3,
+      #           '%s%s: should be indented +1 space inside %s' % (
+      #               access_match.group(2), slots, parent))
 
     # Consume braces or semicolons from what's left of the line
     while True:
@@ -3414,10 +3401,11 @@ def CheckSpacing(filename, clean_lines, linenum, nesting_state, error):
               'Redundant blank line at the end of a code block '
               'should be deleted.')
 
-    matched = Match(r'\s*(public|protected|private):', prev_line)
-    if matched:
-      error(filename, linenum, 'whitespace/blank_line', 3,
-            'Do not leave a blank line after "%s:"' % matched.group(1))
+    if _coglint_state.picky:
+      matched = Match(r'\s*(public|protected|private):', prev_line)
+      if matched:
+        error(filename, linenum, 'whitespace/blank_line', 3,
+              'Do not leave a blank line after "%s:"' % matched.group(1))
 
   # Next, check comments
   next_line_start = 0
@@ -4504,6 +4492,7 @@ def CheckStyle(filename, clean_lines, linenum, file_extension, nesting_state,
   # because the rules for how to indent those are non-trivial.
   if (not Search(r'[",=><] *$', prev) and
       (initial_spaces == 1 or initial_spaces == 3) and
+      not Match(r'/\*.*override.*\*/', line) and
       not Match(scope_or_label_pattern, cleansed_line) and
       not (clean_lines.raw_lines[linenum] != line and
            Match(r'^\s*""', line))):
@@ -4511,9 +4500,11 @@ def CheckStyle(filename, clean_lines, linenum, file_extension, nesting_state,
           'Weird number of spaces at line-start.  '
           'Are you using a 2-space indent?')
 
-  if line and line[-1].isspace():
-    error(filename, linenum, 'whitespace/end_of_line', 4,
-          'Line ends in whitespace.  Consider deleting these extra spaces.')
+  # Only complain about end-of-line white space if in picky mode
+  if _coglint_state.picky:
+    if line and line[-1].isspace():
+      error(filename, linenum, 'whitespace/end_of_line', 4,
+            'Line ends in whitespace.  Consider deleting these extra spaces.')
 
   # Check if the line is a header guard.
   is_header_guard = False
@@ -4540,9 +4531,10 @@ def CheckStyle(filename, clean_lines, linenum, file_extension, nesting_state,
       not Match(r'^// \$Id:.*#[0-9]+ \$$', line) and
       not Match(r'^\s*/// [@\\](copydoc|copydetails|copybrief) .*$', line)):
     line_width = GetLineWidth(line)
-    if line_width > _line_length:
-      error(filename, linenum, 'whitespace/line_length', 2,
-            'Lines should be <= %i characters long' % _line_length)
+    if _coglint_state.picky:
+      if line_width > _line_length:
+        error(filename, linenum, 'whitespace/line_length', 2,
+              'Try to keep your line less than %s characters long. Longer is acceptable if it is reasonable and makes sense.' % _line_length)
 
   if (cleansed_line.count(';') > 1 and
       # allow simple single line lambdas
@@ -4706,10 +4698,11 @@ def CheckIncludeLine(filename, clean_lines, linenum, include_state, error):
   #
   # We also make an exception for Lua headers, which follow google
   # naming convention but not the include convention.
-  match = Match(r'#include\s*"([^/]+\.h)"', line)
-  if match and not _THIRD_PARTY_HEADERS_PATTERN.match(match.group(1)):
-    error(filename, linenum, 'build/include_subdir', 4,
-          'Include the directory when naming .h files')
+  # IGNORE HEADER INCLUDE WARNING
+  # match = Match(r'#include\s*"([^/]+\.h)"', line)
+  # if match and not _THIRD_PARTY_HEADERS_PATTERN.match(match.group(1)):
+  #   error(filename, linenum, 'build/include_subdir', 4,
+  #         'Include the directory when naming .h files')
 
   # we shouldn't include a file more than once. actually, there are a
   # handful of instances where doing so is okay, but in general it's
@@ -6104,12 +6097,13 @@ def ProcessFileData(filename, file_extension, lines, error,
     FlagCxx11Features(filename, clean_lines, line, error)
   nesting_state.CheckCompletedBlocks(filename, error)
 
-  CheckForIncludeWhatYouUse(filename, clean_lines, include_state, error)
+  # IGNORE CHECKFORINCLUDEWHATYOUUSE
+  # CheckForIncludeWhatYouUse(filename, clean_lines, include_state, error)
 
   # Check that the .cc file has included its header if it exists.
   # if _IsSourceExtension(file_extension):
   #   CheckHeaderFileIncluded(filename, include_state, error)
-  # TODO: remove include checks
+  # IGNORE CHECKHEADERISINCLUDED
 
   # We check here rather than inside ProcessLine so that we see raw
   # lines rather than "cleaned" lines.
@@ -6346,7 +6340,8 @@ def ParseArguments(args):
                                                  'exclude=',
                                                  'headers=',
                                                  'quiet',
-                                                 'recursive'])
+                                                 'recursive',
+                                                 'picky'])
   except getopt.GetoptError:
     PrintUsage('Invalid arguments.')
 
@@ -6355,6 +6350,7 @@ def ParseArguments(args):
   filters = ''
   counting_style = ''
   recursive = False
+  picky = False
 
   for (opt, val) in opts:
     if opt == '--help':
@@ -6408,6 +6404,8 @@ def ParseArguments(args):
     elif opt == '--quiet':
       global _quiet
       _quiet = True
+    elif opt == '--picky':
+      picky = True
 
   if not filenames:
     PrintUsage('No files were specified.')
@@ -6422,6 +6420,7 @@ def ParseArguments(args):
   _SetVerboseLevel(verbosity)
   _SetFilters(filters)
   _SetCountingStyle(counting_style)
+  _SetPickyEnable(picky)
 
   return filenames
 
