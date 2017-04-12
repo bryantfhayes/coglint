@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='coglint',
-      version='1.0.1',
+      version='1.0.2',
       py_modules=['coglint'],
       # generate platform specific start script
       entry_points={
