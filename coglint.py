@@ -59,6 +59,10 @@ import sys
 import unicodedata
 import xml.etree.ElementTree
 
+# global variables
+global_fix = False
+fixes = []
+
 # if empty, use defaults
 _header_extensions = set([])
 
@@ -84,6 +88,26 @@ def GetAllExtensions():
 def GetNonHeaderExtensions():
   return GetAllExtensions().difference(GetHeaderExtensions())
 
+def fix(filename, linenum, searchExp, replacement):
+  if global_fix:
+    fixes.append({'filename' : filename, 'linenum' : linenum, 'searchExp' : searchExp, 'replacement' : replacement})
+
+def applyFixes():
+  if len(fixes) <= 0:
+    print("NOTHING TO FIX!")
+    return
+
+  lines = []
+  with open(fixes[0]['filename'], 'r') as fp:
+    lines = fp.readlines()
+
+  for fix in fixes:
+    print(len(lines))
+    print(fix['linenum'])
+    print(lines[fix['linenum']-1])
+    line = re.sub(fix['searchExp'], fix['replacement'], lines[fix['linenum']-1])
+    print(line)
+
 
 _USAGE = """
 Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
@@ -94,6 +118,8 @@ Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
                    [--headers=ext1,ext2]
                    [--extensions=hpp,cpp,...]
                    [--picky]
+                   [--fix]
+                   [--gui]
         <file> [file] ...
 
   The style guidelines this tries to follow are those in
@@ -206,6 +232,15 @@ Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
     picky
       Adds additional checks that are primarily considered 'extra'. For example
       extra whitespace at the end of a line.
+
+    fix
+      This flag enables certain warnings to be automatically fixed (such as whitespace removal).
+
+    gui
+      User is shown a GUI highlighting all the warnings found. If used with the --fix flag,
+      two windows will be shown, the left one containing the file with the warnings highlighted,
+      and the right with the file following the automatic changes. The user must then confirm
+      that the changes are OK.
 
     exclude=path
       Exclude the given path from the list of files to be linted. Relative
@@ -977,6 +1012,8 @@ class _coglintState(object):
 
   def __init__(self):       # picky mode enabled?
     self.picky = False
+    self.gui = False
+    self.fix = False
     self.verbose_level = 1  # global setting.
     self.error_count = 0    # global count of reported errors
     # filters to apply when emitting error messages
@@ -1013,6 +1050,20 @@ class _coglintState(object):
     last_picky_enabled = self.picky
     self.picky = enabled
     return self.picky
+
+  def SetFixEnable(self, enabled):
+    """Sets the module to be automatically fix whitespace issues"""
+    global global_fix
+    last_fix_enabled = self.fix
+    self.fix = enabled
+    global_fix = enabled
+    return self.fix
+
+  def SetGuiEnable(self, enabled):
+    """Sets the module to use the GUI for displaying errors"""
+    last_gui_enabled = self.gui
+    self.gui = enabled
+    return self.gui
 
   def SetCountingStyle(self, counting_style):
     """Sets the module's counting options."""
@@ -1160,6 +1211,12 @@ def _SetVerboseLevel(level):
 
 def _SetPickyEnable(enabled):
   return _coglint_state.SetPickyEnable(enabled)
+
+def _SetFixEnable(enabled):
+  return _coglint_state.SetFixEnable(enabled)
+
+def _SetGuiEnable(enabled):
+  return _coglint_state.SetGuiEnable(enabled)
 
 def _SetCountingStyle(level):
   """Sets the module's counting options."""
@@ -3265,6 +3322,7 @@ def CheckComment(line, filename, linenum, next_line_start, error):
         middle_whitespace = match.group(3)
         # Comparisons made explicit for correctness -- pylint: disable=g-explicit-bool-comparison
         if middle_whitespace != ' ' and middle_whitespace != '':
+          fix(filename, linenum, r'(.*TODO\(.*?\))(.*)', r'\1 \2')
           error(filename, linenum, 'whitespace/todo', 2,
                 'TODO(my_username) should be followed by a space')
 
@@ -6346,7 +6404,8 @@ def ParseArguments(args):
                                                  'headers=',
                                                  'quiet',
                                                  'recursive',
-                                                 'picky'])
+                                                 'picky',
+                                                 'fix'])
   except getopt.GetoptError:
     PrintUsage('Invalid arguments.')
 
@@ -6356,6 +6415,8 @@ def ParseArguments(args):
   counting_style = ''
   recursive = False
   picky = False
+  fix = False
+  gui = False
 
   for (opt, val) in opts:
     if opt == '--help':
@@ -6411,6 +6472,10 @@ def ParseArguments(args):
       _quiet = True
     elif opt == '--picky':
       picky = True
+    elif opt == '--fix':
+      fix = True
+    elif opt == '--gui':
+      gui = True
 
   if not filenames:
     PrintUsage('No files were specified.')
@@ -6426,6 +6491,8 @@ def ParseArguments(args):
   _SetFilters(filters)
   _SetCountingStyle(counting_style)
   _SetPickyEnable(picky)
+  _SetGuiEnable(gui)
+  _SetFixEnable(fix)
 
   return filenames
 
@@ -6486,6 +6553,10 @@ def main():
 
   finally:
     sys.stderr = backup_err
+
+  # apply fixes if requested
+  if global_fix:
+    applyFixes()
 
   sys.exit(_coglint_state.error_count > 0)
 
