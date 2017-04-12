@@ -93,6 +93,7 @@ Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
                    [--exclude=path]
                    [--headers=ext1,ext2]
                    [--extensions=hpp,cpp,...]
+                   [--picky]
         <file> [file] ...
 
   The style guidelines this tries to follow are those in
@@ -201,6 +202,10 @@ Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
       of files to be linted is replaced by all files that descend from that
       directory. Files with extensions not in the valid extensions list are
       excluded.
+
+    picky
+      Adds additional checks that are primarily considered 'extra'. For example
+      extra whitespace at the end of a line.
 
     exclude=path
       Exclude the given path from the list of files to be linted. Relative
