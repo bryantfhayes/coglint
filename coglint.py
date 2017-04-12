@@ -59,6 +59,9 @@ import sys
 import unicodedata
 import xml.etree.ElementTree
 
+# gui library
+from ui.mainwindow import *
+
 # global variables
 global_fix = False
 fixes = []
@@ -106,7 +109,14 @@ def applyFixes():
     print(fix['linenum'])
     print(lines[fix['linenum']-1])
     line = re.sub(fix['searchExp'], fix['replacement'], lines[fix['linenum']-1])
-    print(line)
+    lines[fix['linenum']-1] = line
+
+  with open(fix['filename']+".bak", 'w') as fp:
+    for line in lines:
+      fp.write(line)
+
+  main_window = MainWindow()
+  main_window.start(fix['filename'], fix['filename']+".bak")
 
 
 _USAGE = """
