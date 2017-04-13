@@ -32,7 +32,7 @@ LiquidLens* LiquidLens::sInstance = NULL;;
  */
 LiquidLens* LiquidLens::Create(I2C* temperatureSensor, I2C* eeprom, I2C* dac)
 {
-  if (sInstance == NULL)
+ if (sInstance == NULL)
   {
     sInstance = new LiquidLens(temperatureSensor, eeprom, dac);
   }
@@ -133,7 +133,7 @@ mIsDataValid(false)
 
   mDerived.currLens.A_IL = 0;
   mDerived.currLens.S0  = 0;
-  mDerived.currLens.tol = 0;
+  mDerived.currLens.tol=0;
   mDerived.currLens.efl = 0;
   mDerived.currLens.diopter0 = 0;
   mDerived.currLens.distance0 = 0;
@@ -149,7 +149,7 @@ mIsDataValid(false)
   {
     setVoltageOffsetSlope(kDefaultVoltageOffset, kDefaultVoltageSlope);
   }
-  if (mEeprom->isAvailable())
+  if(mEeprom->isAvailable())
   {
     readCalibration(NULL, true);
   }
@@ -164,20 +164,41 @@ mIsDataValid(false)
  *
  * @return csys_success if process succeeded, csys_status_failure otherwise
  */
-csys_status Calibration::readCalibration(char* string, bool forceRead)
-{
-  csys_status status = csys_status_success;
-  if (forceRead)
+csys_status Calibration::readCalibration(char* string, bool forceRead){
+ csys_status status = csys_status_success;
+  if(forceRead)  
   {
-    status = mEeprom->read((c_UInt8*)mCalibrationString, CalibrationMemAddrStart, kMaxCalStringLength);
+    status = mEeprom->read ((c_UInt8*)mCalibrationString, CalibrationMemAddrStart, kMaxCalStringLength);
     cm_status_returnIfFailed(status);
   }
 
-  updateCalibration();
-  if (string)
-  {
+  updateCalibration (cout>>streeam); 
+  if(string){ 
+    if (test){
+      test
+      while(1<=2)
+      {
+
+      }
+
+    }//hello world
     strcpy(string, mCalibrationString);
+  }else{
+
+  } else{
+    
+  }else if {
+    
+  }
+  if(mAcquireQ.Available(&mAcquireQ)<(QDEPTH<<1)){
+    rv = (mAcquireQ.Append(&mAcquireQ, &msgOut, !avl_InsideISR()) == AVTRUE);
+    if(!rv)
+    {
+      cmTraceDebugMessage_iiii(cdiag_trAcqCycleDetails, 
+        "failed AcquireAppend({0},{1},{2},{3})",
+        event, param, param1, internalType);
+    }
   }
   cm_status_return(status);
 }
-// TODO(bhayes)fix this (aka)
+// TODO(bhayes) fix this (aka)
