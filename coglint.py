@@ -59,6 +59,13 @@ import sys
 import unicodedata
 import xml.etree.ElementTree
 
+# gui library
+from ui.mainwindow import *
+
+# global variables
+global_fix = False
+fixes = []
+
 # if empty, use defaults
 _header_extensions = set([])
 
@@ -84,6 +91,30 @@ def GetAllExtensions():
 def GetNonHeaderExtensions():
   return GetAllExtensions().difference(GetHeaderExtensions())
 
+def fix(filename, linenum, searchExp, replacement):
+  if global_fix:
+    fixes.append({'filename' : filename, 'linenum' : linenum, 'searchExp' : searchExp, 'replacement' : replacement})
+
+def applyFixes():
+  if len(fixes) <= 0:
+    print("NOTHING TO FIX!")
+    return
+
+  lines = []
+  with open(fixes[0]['filename'], 'r') as fp:
+    lines = fp.readlines()
+
+  for fix in fixes:
+    line = re.sub(fix['searchExp'], fix['replacement'], lines[fix['linenum']-1])
+    lines[fix['linenum']-1] = line
+
+  with open(fix['filename']+".bak", 'w') as fp:
+    for line in lines:
+      fp.write(line)
+
+  main_window = MainWindow()
+  main_window.start(fix['filename'], fix['filename']+".bak")
+
 
 _USAGE = """
 Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
@@ -94,6 +125,8 @@ Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
                    [--headers=ext1,ext2]
                    [--extensions=hpp,cpp,...]
                    [--picky]
+                   [--fix]
+                   [--gui]
         <file> [file] ...
 
   The style guidelines this tries to follow are those in
@@ -206,6 +239,15 @@ Syntax: coglint.py [--verbose=#] [--output=emacs|eclipse|vs7|junit]
     picky
       Adds additional checks that are primarily considered 'extra'. For example
       extra whitespace at the end of a line.
+
+    fix
+      This flag enables certain warnings to be automatically fixed (such as whitespace removal).
+
+    gui
+      User is shown a GUI highlighting all the warnings found. If used with the --fix flag,
+      two windows will be shown, the left one containing the file with the warnings highlighted,
+      and the right with the file following the automatic changes. The user must then confirm
+      that the changes are OK.
 
     exclude=path
       Exclude the given path from the list of files to be linted. Relative
@@ -977,6 +1019,8 @@ class _coglintState(object):
 
   def __init__(self):       # picky mode enabled?
     self.picky = False
+    self.gui = False
+    self.fix = False
     self.verbose_level = 1  # global setting.
     self.error_count = 0    # global count of reported errors
     # filters to apply when emitting error messages
@@ -1013,6 +1057,20 @@ class _coglintState(object):
     last_picky_enabled = self.picky
     self.picky = enabled
     return self.picky
+
+  def SetFixEnable(self, enabled):
+    """Sets the module to be automatically fix whitespace issues"""
+    global global_fix
+    last_fix_enabled = self.fix
+    self.fix = enabled
+    global_fix = enabled
+    return self.fix
+
+  def SetGuiEnable(self, enabled):
+    """Sets the module to use the GUI for displaying errors"""
+    last_gui_enabled = self.gui
+    self.gui = enabled
+    return self.gui
 
   def SetCountingStyle(self, counting_style):
     """Sets the module's counting options."""
@@ -1160,6 +1218,12 @@ def _SetVerboseLevel(level):
 
 def _SetPickyEnable(enabled):
   return _coglint_state.SetPickyEnable(enabled)
+
+def _SetFixEnable(enabled):
+  return _coglint_state.SetFixEnable(enabled)
+
+def _SetGuiEnable(enabled):
+  return _coglint_state.SetGuiEnable(enabled)
 
 def _SetCountingStyle(level):
   """Sets the module's counting options."""
@@ -2148,6 +2212,7 @@ def CheckForNewlineAtEOF(filename, lines, error):
   # To verify that the file ends in \n, we just have to make sure the
   # last-but-two element of lines() exists and is empty.
   if len(lines) < 3 or lines[-2]:
+    fix(filename, len(lines) - 2, r'(.*)', r'\1\n')
     error(filename, len(lines) - 2, 'whitespace/ending_newline', 5,
           'Could not find a newline character at the end of the file.')
 
@@ -3104,6 +3169,7 @@ def CheckSpacingForFunctionCall(filename, clean_lines, linenum, error):
         not Search(r'\bcase\s+\(', fncall)):
       # TODO(unknown): Space after an operator function seem to be a common
       # error, silence those for now by restricting them to highest verbosity.
+      fix(filename, linenum, r'(.*) (\(.*)', r'\1\2')
       if Search(r'\boperator_*\b', line):
         error(filename, linenum, 'whitespace/parens', 0,
               'Extra space before ( in function call')
@@ -3243,6 +3309,7 @@ def CheckComment(line, filename, linenum, next_line_start, error):
             line[commentpos-1] not in string.whitespace) or
            (commentpos >= 2 and
             line[commentpos-2] not in string.whitespace))):
+        fix(filename, linenum, r'(.*?)\s*(//.*)', r'\1  \2')
         error(filename, linenum, 'whitespace/comments', 2,
               'At least two spaces is best between code and comments')
 
@@ -3265,6 +3332,7 @@ def CheckComment(line, filename, linenum, next_line_start, error):
         middle_whitespace = match.group(3)
         # Comparisons made explicit for correctness -- pylint: disable=g-explicit-bool-comparison
         if middle_whitespace != ' ' and middle_whitespace != '':
+          fix(filename, linenum, r'(.*TODO\(.*?\))(.*)', r'\1 \2')
           error(filename, linenum, 'whitespace/todo', 2,
                 'TODO(my_username) should be followed by a space')
 
@@ -3273,6 +3341,7 @@ def CheckComment(line, filename, linenum, next_line_start, error):
       # it's a /// or //! Doxygen comment.
       if (Match(r'//[^ ]*\w', comment) and
           not Match(r'(///|//\!)(\s+|$)', comment)):
+        fix(filename, linenum, r'^(.*//)(.*)', r'\1 \2')
         error(filename, linenum, 'whitespace/comments', 4,
               'Should have a space between // and comment')
 
@@ -3386,6 +3455,7 @@ def CheckSpacing(filename, clean_lines, linenum, nesting_state, error):
                      or Match(r' {4}:', prev_line))
 
       if not exception:
+        fix(filename, linenum, r'(.*\n)', "")
         error(filename, linenum, 'whitespace/blank_line', 2,
               'Redundant blank line at the start of a code block '
               'should be deleted.')
@@ -3402,6 +3472,7 @@ def CheckSpacing(filename, clean_lines, linenum, nesting_state, error):
       if (next_line
           and Match(r'\s*}', next_line)
           and next_line.find('} else ') == -1):
+        fix(filename, linenum, r'(.*\n)', "")
         error(filename, linenum, 'whitespace/blank_line', 3,
               'Redundant blank line at the end of a code block '
               'should be deleted.')
@@ -3470,6 +3541,7 @@ def CheckOperatorSpacing(filename, clean_lines, linenum, error):
       # Operators taken from [lex.operators] in C++11 standard.
       and not Search(r'(>=|<=|==|!=|&=|\^=|\|=|\+=|\*=|\/=|\%=)', line)
       and not Search(r'operator=', line)):
+    fix(filename, linenum, r'(.*)([^ ]*)=([^ ]*)(.*)', r'\1\2 = \3\4')
     error(filename, linenum, 'whitespace/operators', 4,
           'Missing spaces around =')
 
@@ -3490,6 +3562,7 @@ def CheckOperatorSpacing(filename, clean_lines, linenum, error):
   # many false positives due to RValue references.
   match = Search(r'[^<>=!\s](==|!=|<=|>=|\|\|)[^<>=!\s,;\)]', line)
   if match:
+    fix(filename, linenum, '(.*)([^ ]*){}([^ ]*)(.*)'.format(match.group(1)), r'\1\2' + " {} ".format(match.group(1)) + r'\3\4')
     error(filename, linenum, 'whitespace/operators', 3,
           'Missing spaces around %s' % match.group(1))
   elif not Match(r'#.*include', line):
@@ -3502,6 +3575,7 @@ def CheckOperatorSpacing(filename, clean_lines, linenum, error):
       (_, _, end_pos) = CloseExpression(
           clean_lines, linenum, len(match.group(1)))
       if end_pos <= -1:
+        fix(filename, linenum, r'(.*?)([^ ]*?)([<>]*)<([<>]*)([^ ]*?)(.*?)', r'\1\2 \3<\4 \5\6')
         error(filename, linenum, 'whitespace/operators', 3,
               'Missing spaces around <')
 
@@ -3513,6 +3587,7 @@ def CheckOperatorSpacing(filename, clean_lines, linenum, error):
       (_, _, start_pos) = ReverseCloseExpression(
           clean_lines, linenum, len(match.group(1)))
       if start_pos <= -1:
+        fix(filename, linenum, r'(.*?)([^ ]*?)([<>]*)>([<>]*)([^ ]*?)(.*?)', r'\1\2 \3>\4 \5\6')
         error(filename, linenum, 'whitespace/operators', 3,
               'Missing spaces around >')
 
@@ -3524,6 +3599,7 @@ def CheckOperatorSpacing(filename, clean_lines, linenum, error):
   match = Search(r'(operator|[^\s(<])(?:L|UL|LL|ULL|l|ul|ll|ull)?<<([^\s,=<])', line)
   if (match and not (match.group(1).isdigit() and match.group(2).isdigit()) and
       not (match.group(1) == 'operator' and match.group(2) == ';')):
+    fix(filename, linenum, r'(.*?)([^ <>]*)<<([^ <>]*)(.*?)', r'\1\2 << \3\4')
     error(filename, linenum, 'whitespace/operators', 3,
           'Missing spaces around <<')
 
@@ -3541,6 +3617,7 @@ def CheckOperatorSpacing(filename, clean_lines, linenum, error):
   #   type<type<type>> alpha
   match = Search(r'>>[a-zA-Z_]', line)
   if match:
+    fix(filename, linenum, r'(.*?)([^ <>]*)>>([^ <>]*)(.*?)', r'\1\2 >> \3\4')
     error(filename, linenum, 'whitespace/operators', 3,
           'Missing spaces around >>')
 
@@ -3565,6 +3642,7 @@ def CheckParenthesisSpacing(filename, clean_lines, linenum, error):
   # No spaces after an if, while, switch, or for
   match = Search(r' (if\(|for\(|while\(|switch\()', line)
   if match:
+    fix(filename, linenum, r'^(.*)(if|for|while|switch)(\(.*)', r'\1\2 \3')
     error(filename, linenum, 'whitespace/parens', 5,
           'Missing space before ( in %s' % match.group(1))
 
@@ -3613,6 +3691,8 @@ def CheckCommaSpacing(filename, clean_lines, linenum, error):
   # elided comments.
   if (Search(r',[^,\s]', ReplaceAll(r'\boperator\s*,\s*\(', 'F(', line)) and
       Search(r',[^,\s]', raw[linenum])):
+    fix(filename, linenum, r',([^ ])', r', \1')
+    #fix(filename, linenum, r'(.*?,)([^ ].*)', r'\1 \2')
     error(filename, linenum, 'whitespace/comma', 3,
           'Missing space after ,')
 
@@ -3621,6 +3701,7 @@ def CheckCommaSpacing(filename, clean_lines, linenum, error):
   # TODO(unknown): clarify if 'if (1) { return 1;}' is requires one more
   # space after ;
   if Search(r';[^\s};\\)/]', line):
+    fix(filename, linenum, r';([^ ])', r', \1')
     error(filename, linenum, 'whitespace/semicolon', 3,
           'Missing space after ;')
 
@@ -3707,58 +3788,60 @@ def CheckBracesSpacing(filename, clean_lines, linenum, nesting_state, error):
   # And since you should never have braces at the beginning of a line,
   # this is an easy test.  Except that braces used for initialization don't
   # follow the same rule; we often don't want spaces before those.
-  match = Match(r'^(.*[^ ({>]){', line)
+  # match = Match(r'^(.*[^ ({>]){', line)
 
-  if match:
-    # Try a bit harder to check for brace initialization.  This
-    # happens in one of the following forms:
-    #   Constructor() : initializer_list_{} { ... }
-    #   Constructor{}.MemberFunction()
-    #   Type variable{};
-    #   FunctionCall(type{}, ...);
-    #   LastArgument(..., type{});
-    #   LOG(INFO) << type{} << " ...";
-    #   map_of_type[{...}] = ...;
-    #   ternary = expr ? new type{} : nullptr;
-    #   OuterTemplate<InnerTemplateConstructor<Type>{}>
-    #
-    # We check for the character following the closing brace, and
-    # silence the warning if it's one of those listed above, i.e.
-    # "{.;,)<>]:".
-    #
-    # To account for nested initializer list, we allow any number of
-    # closing braces up to "{;,)<".  We can't simply silence the
-    # warning on first sight of closing brace, because that would
-    # cause false negatives for things that are not initializer lists.
-    #   Silence this:         But not this:
-    #     Outer{                if (...) {
-    #       Inner{...}            if (...){  // Missing space before {
-    #     };                    }
-    #
-    # There is a false negative with this approach if people inserted
-    # spurious semicolons, e.g. "if (cond){};", but we will catch the
-    # spurious semicolon with a separate check.
-    leading_text = match.group(1)
-    (endline, endlinenum, endpos) = CloseExpression(
-        clean_lines, linenum, len(match.group(1)))
-    trailing_text = ''
-    if endpos > -1:
-      trailing_text = endline[endpos:]
-    for offset in xrange(endlinenum + 1,
-                         min(endlinenum + 3, clean_lines.NumLines() - 1)):
-      trailing_text += clean_lines.elided[offset]
-    # We also suppress warnings for `uint64_t{expression}` etc., as the style
-    # guide recommends brace initialization for integral types to avoid
-    # overflow/truncation.
-    if (not Match(r'^[\s}]*[{.;,)<>\]:]', trailing_text)
-        and not _IsType(clean_lines, nesting_state, leading_text)):
-      error(filename, linenum, 'whitespace/braces', 5,
-            'Missing space before {')
+  # IGNORE lack of space before '{''
+  # if match:
+  #   # Try a bit harder to check for brace initialization.  This
+  #   # happens in one of the following forms:
+  #   #   Constructor() : initializer_list_{} { ... }
+  #   #   Constructor{}.MemberFunction()
+  #   #   Type variable{};
+  #   #   FunctionCall(type{}, ...);
+  #   #   LastArgument(..., type{});
+  #   #   LOG(INFO) << type{} << " ...";
+  #   #   map_of_type[{...}] = ...;
+  #   #   ternary = expr ? new type{} : nullptr;
+  #   #   OuterTemplate<InnerTemplateConstructor<Type>{}>
+  #   #
+  #   # We check for the character following the closing brace, and
+  #   # silence the warning if it's one of those listed above, i.e.
+  #   # "{.;,)<>]:".
+  #   #
+  #   # To account for nested initializer list, we allow any number of
+  #   # closing braces up to "{;,)<".  We can't simply silence the
+  #   # warning on first sight of closing brace, because that would
+  #   # cause false negatives for things that are not initializer lists.
+  #   #   Silence this:         But not this:
+  #   #     Outer{                if (...) {
+  #   #       Inner{...}            if (...){  // Missing space before {
+  #   #     };                    }
+  #   #
+  #   # There is a false negative with this approach if people inserted
+  #   # spurious semicolons, e.g. "if (cond){};", but we will catch the
+  #   # spurious semicolon with a separate check.
+  #   leading_text = match.group(1)
+  #   (endline, endlinenum, endpos) = CloseExpression(
+  #       clean_lines, linenum, len(match.group(1)))
+  #   trailing_text = ''
+  #   if endpos > -1:
+  #     trailing_text = endline[endpos:]
+  #   for offset in xrange(endlinenum + 1,
+  #                        min(endlinenum + 3, clean_lines.NumLines() - 1)):
+  #     trailing_text += clean_lines.elided[offset]
+  #   # We also suppress warnings for `uint64_t{expression}` etc., as the style
+  #   # guide recommends brace initialization for integral types to avoid
+  #   # overflow/truncation.
+  #   if (not Match(r'^[\s}]*[{.;,)<>\]:]', trailing_text)
+  #       and not _IsType(clean_lines, nesting_state, leading_text)):
+  #     error(filename, linenum, 'whitespace/braces', 5,
+  #           'Missing space before {')
 
+  # IGNORE space before else on same line
   # Make sure '} else {' has spaces.
-  if Search(r'}else', line):
-    error(filename, linenum, 'whitespace/braces', 5,
-          'Missing space before else')
+  # if Search(r'}else', line):
+  #   error(filename, linenum, 'whitespace/braces', 5,
+  #         'Missing space before else')
 
   # You shouldn't have a space before a semicolon at the end of the line.
   # There's a special case for "for" since the style guide allows space before
@@ -3872,7 +3955,7 @@ def GetPreviousNonBlankLine(clean_lines, linenum):
   return ('', -1)
 
 
-def CheckBraces(filename, clean_lines, linenum, error):
+def CheckBraces(filename, clean_lines, linenum, nesting_state, error):
   """Looks for misplaced braces (e.g. at the end of line).
 
   Args:
@@ -3886,6 +3969,8 @@ def CheckBraces(filename, clean_lines, linenum, error):
 
   if Match(r'.*{\s*$', line):
     if (not Match(r'\s*{\s*$', line)):
+      block_indent = len(nesting_state.stack)-1
+      fix(filename, linenum, r'^(.*?)\s*({\s*)', r'\1\n' + "  "*block_indent + r'\2')
       error(filename, linenum, 'whitespace/braces', 4, '{ should be on it\'s own line')
   # if Match(r'\s*{\s*$', line):
     # We allow an open brace to start a line in the case where someone is using
@@ -3912,24 +3997,27 @@ def CheckBraces(filename, clean_lines, linenum, error):
   #           'An else should appear on the same line as the preceding }')
   if Match(r'.*else\b\s*(?:if\b|\{|$)', line):
     if (not Match(r'\s*else\b\s*(?:if\b|\{|$)', line)):
+      block_indent = len(nesting_state.stack)-1
+      fix(filename, linenum, r'(.*})\s*(else|else if)(.*)', r'\1\n' + "  "*block_indent + r'\2\3')
       error(filename, linenum, 'whitespace/newline', 4, 'An else should not appear on the same line as the preceding }')
 
+  # IGNORE ELSE BRACE WARNING B/C ELSE SHOULD BE ON ITS OWN LINE
   # If braces come on one side of an else, they should be on both.
   # However, we have to worry about "else if" that spans multiple lines!
-  if Search(r'else if\s*\(', line):       # could be multi-line if
-    brace_on_left = bool(Search(r'}\s*else if\s*\(', line))
-    # find the ( after the if
-    pos = line.find('else if')
-    pos = line.find('(', pos)
-    if pos > 0:
-      (endline, _, endpos) = CloseExpression(clean_lines, linenum, pos)
-      brace_on_right = endline[endpos:].find('{') != -1
-      if brace_on_left != brace_on_right:    # must be brace after if
-        error(filename, linenum, 'readability/braces', 5,
-              'If an else has a brace on one side, it should have it on both')
-  elif Search(r'}\s*else[^{]*$', line) or Match(r'[^}]*else\s*{', line):
-    error(filename, linenum, 'readability/braces', 5,
-          'If an else has a brace on one side, it should have it on both')
+  # if Search(r'else if\s*\(', line):       # could be multi-line if
+  #   brace_on_left = bool(Search(r'}\s*else if\s*\(', line))
+  #   # find the ( after the if
+  #   pos = line.find('else if')
+  #   pos = line.find('(', pos)
+  #   if pos > 0:
+  #     (endline, _, endpos) = CloseExpression(clean_lines, linenum, pos)
+  #     brace_on_right = endline[endpos:].find('{') != -1
+  #     if brace_on_left != brace_on_right:    # must be brace after if
+  #       error(filename, linenum, 'readability/braces', 5,
+  #             'If an else has a brace on one side, it should have it on both')
+  # elif Search(r'}\s*else[^{]*$', line) or Match(r'[^}]*else\s*{', line):
+  #   error(filename, linenum, 'readability/braces', 5,
+  #         'If an else has a brace on one side, it should have it on both')
 
   # Likewise, an else should never have the else clause on the same line
   if Search(r'\belse [^\s{]', line) and not Search(r'\belse if\b', line):
@@ -4501,13 +4589,16 @@ def CheckStyle(filename, clean_lines, linenum, file_extension, nesting_state,
       not Match(scope_or_label_pattern, cleansed_line) and
       not (clean_lines.raw_lines[linenum] != line and
            Match(r'^\s*""', line))):
+    repl = ("  " if len(nesting_state.stack) == 1 else "")
+    fix(filename, linenum, r'^(\s*)(.*)', "{}".format(repl) + r'\2')
     error(filename, linenum, 'whitespace/indent', 3,
           'Weird number of spaces at line-start.  '
           'Are you using a 2-space indent?')
 
   # Only complain about end-of-line white space if in picky mode
-  if _coglint_state.picky:
-    if line and line[-1].isspace():
+  if line and line[-1].isspace():
+    fix(filename, linenum, r'(.*?) *$', r'\1')
+    if _coglint_state.picky:
       error(filename, linenum, 'whitespace/end_of_line', 4,
             'Line ends in whitespace.  Consider deleting these extra spaces.')
 
@@ -4557,7 +4648,7 @@ def CheckStyle(filename, clean_lines, linenum, file_extension, nesting_state,
           'More than one command on the same line')
 
   # Some more style checks
-  CheckBraces(filename, clean_lines, linenum, error)
+  CheckBraces(filename, clean_lines, linenum, nesting_state, error)
   CheckTrailingSemicolon(filename, clean_lines, linenum, error)
   CheckEmptyBlockBody(filename, clean_lines, linenum, error)
   CheckAccess(filename, clean_lines, linenum, nesting_state, error)
@@ -5093,8 +5184,9 @@ def CheckPrintf(filename, clean_lines, linenum, error):
           'Never use sprintf. Use snprintf instead.')
   match = Search(r'\b(strcpy|strcat)\s*\(', line)
   if match:
-    error(filename, linenum, 'runtime/printf', 4,
-          'Almost always, snprintf is better than %s' % match.group(1))
+    if _coglint_state.picky:
+      error(filename, linenum, 'runtime/printf', 4,
+            'Almost always, snprintf is better than %s' % match.group(1))
 
 
 def IsDerivedFunction(clean_lines, linenum):
@@ -6346,7 +6438,8 @@ def ParseArguments(args):
                                                  'headers=',
                                                  'quiet',
                                                  'recursive',
-                                                 'picky'])
+                                                 'picky',
+                                                 'fix'])
   except getopt.GetoptError:
     PrintUsage('Invalid arguments.')
 
@@ -6356,6 +6449,8 @@ def ParseArguments(args):
   counting_style = ''
   recursive = False
   picky = False
+  fix = False
+  gui = False
 
   for (opt, val) in opts:
     if opt == '--help':
@@ -6411,6 +6506,10 @@ def ParseArguments(args):
       _quiet = True
     elif opt == '--picky':
       picky = True
+    elif opt == '--fix':
+      fix = True
+    elif opt == '--gui':
+      gui = True
 
   if not filenames:
     PrintUsage('No files were specified.')
@@ -6426,6 +6525,8 @@ def ParseArguments(args):
   _SetFilters(filters)
   _SetCountingStyle(counting_style)
   _SetPickyEnable(picky)
+  _SetGuiEnable(gui)
+  _SetFixEnable(fix)
 
   return filenames
 
@@ -6486,6 +6587,10 @@ def main():
 
   finally:
     sys.stderr = backup_err
+
+  # apply fixes if requested
+  if global_fix:
+    applyFixes()
 
   sys.exit(_coglint_state.error_count > 0)
 
