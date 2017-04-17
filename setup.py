@@ -2,7 +2,8 @@ from setuptools import setup
 
 setup(name='coglint',
       version='1.0.3',
-      py_modules=['coglint'],
+      packages=['ui', 'difflibparser'],
+      #py_modules=['coglint', 'ui.mainwindow', 'ui.mainwindow_ui', 'difflibparser.difflibparser'],
       # generate platform specific start script
       entry_points={
         'console_scripts': [
