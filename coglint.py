@@ -108,7 +108,7 @@ def applyFixes():
     line = re.sub(fix['searchExp'], fix['replacement'], lines[fix['linenum']-1])
     lines[fix['linenum']-1] = line
 
-  with open(fix['filename']+".bak", 'w') as fp:
+  with open(fix['filename']+".bak", 'w', newline='\n') as fp:
     for line in lines:
       fp.write(line)
 
