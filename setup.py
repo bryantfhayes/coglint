@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='coglint',
-      version='1.0.5',
+      version='1.0.6',
       packages=['ui', 'difflibparser'],
       py_modules=['coglint'],
       # generate platform specific start script
